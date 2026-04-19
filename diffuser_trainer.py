@@ -28,8 +28,6 @@ import pipeline
 from torchvision.utils import save_image
 from torchvision.models import vgg16
 output_dir = 'logs'
-version_name='Baseline'
-logger = TensorBoardLogger(name='placental',save_dir = output_dir )
 import matplotlib.pyplot as plt
 # import tent
 import math
@@ -108,7 +106,11 @@ class CoolSystem(pl.LightningModule):
 
     def guided_prob_map(self, y0_g, y0_l, bz, nc, np):
     
-        distance_to_diag = torch.tensor([[abs(i-j)  for j in range(np)] for i in range(np)]).to(self.device)
+        distance_to_diag = torch.tensor(
+            [[abs(i-j)  for j in range(np)] for i in range(np)],
+            device=self.device,
+            dtype=y0_g.dtype,
+        )
 
         weight_g = 1 - distance_to_diag / (np-1)
         weight_l = distance_to_diag / (np-1)
@@ -243,7 +245,14 @@ class CoolSystem(pl.LightningModule):
 
 def main():
     RESUME = False
-    resume_checkpoint_path = r'logs/placental/version_0/checkpoints/last.ckpt'
+    config_path = os.environ.get("DIFFMIC_CONFIG", r'configs/placental.yml')
+    with open(config_path, 'r') as f:
+        params = yaml.safe_load(f)
+    config = EasyDict(params)
+    dataset_name = str(config.data.dataset).lower()
+    logger = TensorBoardLogger(name=dataset_name, save_dir=output_dir)
+
+    resume_checkpoint_path = rf'logs/{dataset_name}/version_0/checkpoints/last.ckpt'
     if RESUME == False:
         resume_checkpoint_path =None
 
@@ -253,12 +262,8 @@ def main():
     np.random.seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+        torch.set_float32_matmul_precision('medium')
     torch.backends.cudnn.benchmark = True
-
-    config_path = r'configs/placental.yml'
-    with open(config_path, 'r') as f:
-        params = yaml.safe_load(f)
-    config = EasyDict(params)
 
 
     # hparams = Namespace(**args)
@@ -267,7 +272,7 @@ def main():
 
     checkpoint_callback = ModelCheckpoint(
         monitor='f1',
-        filename='placental-epoch{epoch:02d}-accuracy-{accuracy:.4f}-f1-{f1:.4f}',
+        filename=f'{dataset_name}-epoch{{epoch:02d}}-accuracy-{{accuracy:.4f}}-f1-{{f1:.4f}}',
         auto_insert_metric_name=False,   
         every_n_epochs=1,
         save_top_k=1,
@@ -276,12 +281,13 @@ def main():
     )
     lr_monitor_callback = LearningRateMonitor(logging_interval='step')
     accelerator = 'gpu' if torch.cuda.is_available() else 'cpu'
+    precision = os.environ.get("DIFFMIC_PRECISION", '16-mixed' if accelerator == 'gpu' else 32)
     trainer = pl.Trainer(
         check_val_every_n_epoch=5,
         max_epochs=config.training.n_epochs,
         accelerator=accelerator,
         devices=1,
-        precision=32,
+        precision=precision,
         logger=logger,
         strategy="auto",
         enable_progress_bar=True,
