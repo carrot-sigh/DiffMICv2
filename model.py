@@ -214,15 +214,22 @@ class SamEncoder(nn.Module):
     def __init__(self, arch='resnet18', feature_dim=128, config=None, image_size=224):
         super(SamEncoder, self).__init__()
 
-        self.f = []
-        self.f = build_efficient_sam_vits(image_size=image_size)
-        self.featdim = 384
+        self.f = build_efficient_sam_vits()
+        if hasattr(self.f, "image_encoder") and hasattr(self.f.image_encoder, "transformer_output_dim"):
+            self.featdim = self.f.image_encoder.transformer_output_dim
+        else:
+            self.featdim = 384
         
             
         self.g = nn.Conv2d(self.featdim, feature_dim, kernel_size=1, stride=1)
 
     def forward_feature(self, x):
-        feature = self.f(x)
+        if hasattr(self.f, "get_image_embeddings"):
+            feature = self.f.get_image_embeddings(x)
+        else:
+            feature = self.f(x)
+        if isinstance(feature, (list, tuple)):
+            feature = feature[-1]
         feature = self.g(feature)
         feature = F.adaptive_avg_pool2d(feature,(1,1))
         return torch.flatten(feature,start_dim=1)
@@ -230,4 +237,3 @@ class SamEncoder(nn.Module):
     def forward(self, x):
         feature = self.forward_feature(x)
         return feature
-

@@ -1,6 +1,6 @@
 from typing import Optional
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '6'
+# Do not hard-code GPU index; respect the runtime environment.
 import numpy as np
 import copy
 from pytorch_lightning.utilities.types import EVAL_DATALOADERS, STEP_OUTPUT
@@ -82,7 +82,7 @@ class CoolSystem(pl.LightningModule):
 
     def init_weight(self,ckpt_path=None):
         
-        if ckpt_path:
+        if ckpt_path and os.path.exists(ckpt_path):
             checkpoint = torch.load(ckpt_path,map_location=self.device)[0]
             checkpoint_model = checkpoint
             state_dict = self.aux_model.state_dict()
@@ -93,6 +93,8 @@ class CoolSystem(pl.LightningModule):
             state_dict.update(checkpoint_model)
             
             self.aux_model.load_state_dict(state_dict) 
+        elif ckpt_path:
+            print(f"[Warning] Aux checkpoint not found: {ckpt_path}. Continue without loading pretrained aux weights.")
 
     def diffusion_focal_loss(self, prior, targets, noise, noise_gt, gamma=1, alpha=10):
         probs = F.softmax(prior, dim=1)
@@ -273,10 +275,11 @@ def main():
         save_last=True
     )
     lr_monitor_callback = LearningRateMonitor(logging_interval='step')
+    accelerator = 'gpu' if torch.cuda.is_available() else 'cpu'
     trainer = pl.Trainer(
         check_val_every_n_epoch=5,
         max_epochs=config.training.n_epochs,
-        accelerator='gpu',
+        accelerator=accelerator,
         devices=1,
         precision=32,
         logger=logger,
